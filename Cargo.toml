@@ -1,0 +1,13 @@
+[package]
+edition = "2021"
+name    = "dns-update"
+version = "0.1.0"
+
+[dependencies]
+bollard            = "0.18.1"
+futures-util       = "0.3"
+hickory-client     = { version = "0.24", features = ["dnssec"] }
+log                = "0.4.22"
+tokio              = { version = "1.0", features = ["full"] }
+tracing            = "0.1"
+tracing-subscriber = "0.3"
