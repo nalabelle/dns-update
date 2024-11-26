@@ -1,4 +1,5 @@
 use config::Config;
+use dns_client::DnsClient;
 use log::{error, info};
 use tokio::{signal, sync::mpsc, task::JoinSet};
 
@@ -28,19 +29,24 @@ fn start() -> JoinSet<()> {
     // Watch for hostnames in the channel and update DNS
     let dns_client = DnsMonitor::new(&config);
     pool.spawn(async move {
-        dns_client.monitor(rx).await;
+        dns_client.monitor(rx).await.ok();
     });
 
     // Watch for docker container events and push hostnames into the update channel
     let docker_monitor = DockerMonitor::new(&tx);
     pool.spawn(async move {
-        docker_monitor.monitor_events().await;
+        docker_monitor.monitor_events().await.ok();
     });
 
     // Watch the host system for IP changes and request IP updates for hosts
-    let system_monitor = SystemMonitor::new(&config, &tx);
+    let system_monitor = SystemMonitor::new(
+        DnsClient::new(&config),
+        config.lookup_hostname,
+        config.check_interval,
+        &tx,
+    );
     pool.spawn(async move {
-        system_monitor.monitor_system_dns().await;
+        system_monitor.monitor_system_dns().await.ok();
     });
 
     pool

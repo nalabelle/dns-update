@@ -1,7 +1,8 @@
+use crate::config::Config;
 use hickory_client::client::{AsyncClient, ClientConnection, ClientHandle, Signer};
 use hickory_client::proto::rr::dnssec::tsig::TSigner;
 use hickory_client::rr::rdata::tsig::TsigAlgorithm;
-use hickory_client::rr::IntoName;
+use hickory_client::rr::{rdata, IntoName};
 use log::error;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -9,12 +10,15 @@ use std::sync::Arc;
 use tracing::info;
 
 use hickory_client::{
-    op::{Message, OpCode, Query, ResponseCode, UpdateMessage},
+    op::ResponseCode,
     rr::{DNSClass, Name, RData, Record, RecordType},
     udp::UdpClientConnection,
 };
 
-use crate::config::Config;
+pub trait DnsFetchTrait {
+    async fn fetch(&self, hostname: &str, record_type: RecordType) -> Option<String>;
+}
+
 pub struct DnsClient {
     name_server: SocketAddr,
     dns_zone: Name,
@@ -83,12 +87,7 @@ impl DnsClient {
         Some(client)
     }
 
-    pub async fn fetch(&self, hostname: &str, record_type: RecordType) -> Option<String> {
-        let hostname = self.normalize_hostname(hostname.clone());
-        self.fetch_record(&hostname, record_type).await
-    }
-
-    pub async fn fetch_record(&self, hostname: &Name, record_type: RecordType) -> Option<String> {
+    pub async fn fetch_record(&self, hostname: &Name, record_type: RecordType) -> Option<Record> {
         let mut client = self.connect().await?;
         let Ok(response) = client
             .query(hostname.clone(), DNSClass::IN, record_type)
@@ -100,54 +99,88 @@ impl DnsClient {
             .answers()
             .iter()
             .find(|record| record.record_type() == record_type)
-            .map(|record| record.to_string());
+            .map(|record| record.clone());
     }
 
-    pub async fn update_record(
+    fn build_rdata(record_type: RecordType, data: String) -> Option<RData> {
+        let rdata = match record_type {
+            RecordType::A => RData::A(data.parse().unwrap()),
+            RecordType::TXT => RData::TXT(rdata::TXT::new(vec![data])),
+            _ => {
+                error!("Unsupported record type: {:?}", record_type);
+                return None;
+            }
+        };
+        Some(rdata)
+    }
+
+    pub async fn create_record(
         &self,
         hostname: &Name,
         record_type: RecordType,
         data: String,
+    ) -> Option<bool> {
+        let mut client = self.connect().await.unwrap();
+        let mut record = Record::with(hostname.clone(), record_type, self.ttl);
+        let rdata = DnsClient::build_rdata(record_type, data);
+        record.set_data(rdata);
+        client.create(record, self.dns_zone.clone()).await.ok()?;
+        Some(true)
+    }
+
+    pub async fn update_record(
+        &self,
+        record: &Record,
+        data: String,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut client = self.connect().await.unwrap();
-
-        // Create zone and record names
-        let hostname = Name::from_str(&format!("{}.{}", hostname, self.dns_zone))?;
-
-        // Create update message
-        let mut update = Message::default();
-        update.set_op_code(OpCode::Update);
-
-        // Set the zone in the query section
-        let mut query = Query::default();
-        query.set_name(self.dns_zone);
-        query.set_query_class(DNSClass::IN);
-        query.set_query_type(RecordType::SOA);
-        update.add_query(query);
-
-        // Delete any existing A records
-        let mut delete_record = Record::with(hostname.clone(), RecordType::A, 0);
-        delete_record.set_dns_class(DNSClass::NONE);
-        update.add_updates(vec![delete_record]);
-
-        // Add the new A record
-        let mut record = Record::with(hostname, RecordType::A, self.ttl);
-        record.set_data(Some(RData::A(data.parse()?)));
-        update.add_updates(vec![record]);
+        let mut update = record.clone();
+        update.set_data(DnsClient::build_rdata(record.record_type(), data));
 
         // Send the update and handle responses
-        let responses = client.send(update);
-        let response = responses
-            .into_iter()
-            .next()
-            .ok_or("No response received")?
-            .map_err(|e| format!("DNS update failed: {}", e))?;
+        let responses = client
+            .compare_and_swap(record.clone(), update, self.dns_zone.clone())
+            .await;
+        let response = responses.into_iter().next().ok_or("No response received")?;
 
         if response.response_code() == ResponseCode::NoError {
-            info!("Successfully updated DNS record for {}", hostname);
+            info!("Successfully updated DNS record for {}", record.name());
             Ok(())
         } else {
             Err(format!("DNS update failed: {:?}", response.response_code()).into())
+        }
+    }
+}
+
+impl DnsFetchTrait for DnsClient {
+    async fn fetch(&self, hostname: &str, record_type: RecordType) -> Option<String> {
+        let hostname = self.normalize_hostname(hostname);
+        self.fetch_record(&hostname, record_type)
+            .await
+            .map(|record| record.data().unwrap().to_string())
+    }
+}
+
+pub(crate) mod mock {
+    use super::*;
+
+    pub struct MockDnsClient {
+        pub ip: String,
+    }
+
+    impl DnsFetchTrait for MockDnsClient {
+        async fn fetch(&self, _hostname: &str, _record_type: RecordType) -> Option<String> {
+            Some(self.ip.clone())
+        }
+    }
+
+    impl MockDnsClient {
+        pub fn new() -> Self {
+            Self { ip: String::new() }
+        }
+
+        pub fn set_ip(&mut self, ip: String) {
+            self.ip = ip;
         }
     }
 }
