@@ -1,12 +1,18 @@
 name: Release
 
 on:
+  workflow_dispatch:
   workflow_run:
-    workflows: ["build"]
+    workflows: ["CI"]
     types:
       - completed
     branches:
       - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
 
 jobs:
   release:
@@ -22,7 +28,8 @@ jobs:
       - name: Download artifacts
         uses: dawidd6/action-download-artifact@v2
         with:
-          workflow: build.yml
+          name: dns-update
+          workflow: ci.yml
           workflow_conclusion: success
 
       - name: Setup Node.js
@@ -30,23 +37,22 @@ jobs:
         with:
           node-version: "lts/*"
           cache: "npm"
-          cache-dependency-path: .github/workflows/release.yml
+          cache-dependency-path: .github/release/package.json
 
       - name: Install semantic-release
-        run: |
-          npm install -g semantic-release@21.0.7 @semantic-release/git@10.0.1 @semantic-release/changelog@6.0.3
+        run: npm ci --prefix .github/release
 
       - name: Generate version
         id: semantic
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: npx --prefix .github/release semantic-release
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: steps.semantic.outputs.new_release_published == 'true'
         with:
-          files: dist/*
+          files: dns-update
           tag_name: v${{ steps.semantic.outputs.new_release_version }}
           body: ${{ steps.semantic.outputs.new_release_notes }}
         env:

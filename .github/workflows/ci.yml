@@ -51,5 +51,11 @@ jobs:
       - name: Build
         run: cargo build --release
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: dns-update
+          path: target/release/dns-update
+
       - name: Run tests
         run: cargo test
