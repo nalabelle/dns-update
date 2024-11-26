@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download artifacts
-        uses: dawidd6/action-download-artifact@268677152d06ba59fcec7a7f0b5d961b6ccd7e1e # v2
+        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11 # v6
         with:
           name: dns-update
           workflow: ci.yml
