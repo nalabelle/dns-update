@@ -5,24 +5,22 @@ use log::{error, info};
 use tokio::sync::Mutex;
 use tokio::time;
 
-use crate::config::Config;
-use crate::dns_client::DnsClient;
+use crate::dns_client::DnsFetchTrait;
 use crate::{DnsUpdate, TxChannel};
-pub struct SystemMonitor {
-    dns: DnsClient,
+pub struct SystemMonitor<D: DnsFetchTrait> {
+    dns: D,
     hostname: String,
     check_interval: time::Duration,
     current_ip: Arc<Mutex<String>>,
     tx: TxChannel,
 }
 
-impl SystemMonitor {
-    pub fn new(config: &Config, tx: &TxChannel) -> Self {
-        let dns = DnsClient::new(config);
+impl<D: DnsFetchTrait> SystemMonitor<D> {
+    pub fn new(dns: D, hostname: String, check_interval: time::Duration, tx: &TxChannel) -> Self {
         Self {
             dns,
-            hostname: config.lookup_hostname.clone(),
-            check_interval: config.check_interval,
+            hostname,
+            check_interval,
             current_ip: Arc::new(Mutex::new(String::new())),
             tx: tx.clone(),
         }
@@ -48,7 +46,7 @@ impl SystemMonitor {
             last_ip, current_ip
         );
 
-        self.tx.send(DnsUpdate::IP(current_ip)).await;
+        self.tx.send(DnsUpdate::IP(current_ip)).await.ok();
     }
 
     // Set up a recurring task to check the system IP
@@ -58,5 +56,85 @@ impl SystemMonitor {
             self.check_host_ip().await;
             time::sleep(check_interval).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::dns_client::mock::MockDnsClient;
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_check_host_ip_no_change() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut dns_client = MockDnsClient::new();
+        dns_client.set_ip("1.2.3.4".to_string());
+
+        let monitor = SystemMonitor::new(
+            dns_client,
+            "hostname".to_string(),
+            Duration::from_secs(60),
+            &tx,
+        );
+        monitor.current_ip.lock().await.push_str("1.2.3.4");
+
+        monitor.check_host_ip().await;
+
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_check_host_ip_change() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut dns_client = MockDnsClient::new();
+        dns_client.set_ip("1.2.3.4".to_string());
+
+        let monitor = SystemMonitor::new(
+            dns_client,
+            "hostname".to_string(),
+            Duration::from_secs(60),
+            &tx,
+        );
+        monitor.current_ip.lock().await.push_str("4.3.2.1");
+
+        monitor.check_host_ip().await;
+
+        let update = rx.recv().await.unwrap();
+        if let DnsUpdate::IP(ip) = update {
+            assert_eq!(ip, "1.2.3.4");
+        } else {
+            panic!("Unexpected update type");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_monitor_system_dns() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut dns_client = MockDnsClient::new();
+        dns_client.set_ip("1.2.3.4".to_string());
+
+        let monitor = SystemMonitor::new(
+            dns_client,
+            "hostname".to_string(),
+            Duration::from_secs(60),
+            &tx,
+        );
+        monitor.current_ip.lock().await.push_str("4.3.2.1");
+
+        let monitor_handle = tokio::spawn(async move {
+            monitor.monitor_system_dns().await.unwrap();
+        });
+
+        let update = rx.recv().await.unwrap();
+        if let DnsUpdate::IP(ip) = update {
+            assert_eq!(ip, "1.2.3.4");
+        } else {
+            panic!("Unexpected update type");
+        }
+
+        monitor_handle.abort();
     }
 }

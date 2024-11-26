@@ -81,7 +81,7 @@ impl DockerMonitor {
                 "start" => {
                     tokio::spawn(async move {
                         if let Some(hostname) = DockerMonitor::extract_hostname(event) {
-                            tx.send(DnsUpdate::Host(hostname)).await;
+                            tx.send(DnsUpdate::Host(hostname)).await.ok();
                         }
                     });
                 }
