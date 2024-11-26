@@ -1,8 +1,9 @@
 name: Release
 
 on:
+  workflow_dispatch:
   workflow_run:
-    workflows: ["build"]
+    workflows: ["CI"]
     types:
       - completed
     branches:
