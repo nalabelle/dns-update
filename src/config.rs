@@ -36,3 +36,22 @@ impl Config {
         })
     }
 }
+
+pub(crate) mod mock {
+    use super::*;
+
+    impl Default for Config {
+        fn default() -> Self {
+            Config {
+                dns_server: String::from("127.0.0.1:53"),
+                dns_zone: String::from("example.com"),
+                key_name: String::from("example-com"),
+                key_alg: String::from("hmac-sha256"),
+                key_file: String::from("tests/fixtures/secret.key"),
+                ttl: 300,
+                check_interval: Duration::from_secs(300),
+                lookup_hostname: String::from("thishost.example.com"),
+            }
+        }
+    }
+}

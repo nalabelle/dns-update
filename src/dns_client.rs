@@ -61,8 +61,23 @@ impl DnsClient {
     }
 
     pub fn normalize_hostname(&self, hostname: impl IntoName) -> Name {
-        let hostname = hostname.into_name().unwrap();
+        let mut hostname = hostname.into_name().unwrap();
+        if hostname.len() == 1 {
+            // Annoyingly, hostname.is_empty() always returns false
+            panic!("Empty hostname provided");
+        }
+
         if hostname.is_fqdn() {
+            if self.dns_zone.zone_of(&hostname) {
+                // This is already normalized
+                return hostname.to_lowercase();
+            }
+            panic!("Hostname is not in the DNS zone: {}", hostname);
+        }
+
+        // Hostname's in the DNS zone, but it doesn't have a trailing dot
+        if self.dns_zone.zone_of(&hostname) {
+            hostname.set_fqdn(true);
             return hostname.to_lowercase();
         }
 
@@ -175,12 +190,72 @@ pub(crate) mod mock {
     }
 
     impl MockDnsClient {
+        #[allow(dead_code)]
         pub fn new() -> Self {
             Self { ip: String::new() }
         }
 
+        #[allow(dead_code)]
         pub fn set_ip(&mut self, ip: String) {
             self.ip = ip;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[tokio::test]
+    async fn test_normalize_hostname() {
+        let config = Config::default();
+        let client = DnsClient::new(&config);
+        let hostname = "i-am-a-test";
+
+        let normalized = client.normalize_hostname(hostname);
+        assert_eq!(normalized.to_string(), "i-am-a-test.example.com.");
+    }
+    #[tokio::test]
+    async fn test_normalize_hostname_with_domain() {
+        let config = Config::default();
+        let client = DnsClient::new(&config);
+        let hostname = "i-am-a-test.example.com";
+
+        let normalized = client.normalize_hostname(hostname);
+        assert_eq!(normalized.to_string(), "i-am-a-test.example.com.");
+    }
+
+    #[tokio::test]
+    async fn test_normalize_hostname_with_domain_fqdn_fail() {
+        let config = Config::default();
+        let client = DnsClient::new(&config);
+        let hostname = "i-am-a-test.example.net.";
+        std::panic::set_hook(Box::new(|_| {}));
+
+        let result = std::panic::catch_unwind(|| client.normalize_hostname(hostname));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_normalize_hostname_invalid_hostname() {
+        let config = Config::default();
+        let client = DnsClient::new(&config);
+        let hostname = "invalid_hostname!";
+
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = std::panic::catch_unwind(|| client.normalize_hostname(hostname));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_normalize_hostname_empty_hostname() {
+        let config = Config::default();
+        let client = DnsClient::new(&config);
+        let hostname = "";
+
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = std::panic::catch_unwind(|| client.normalize_hostname(hostname));
+        assert!(result.is_err());
     }
 }
