@@ -17,24 +17,13 @@ optional environment variables:
 
 ### Environment Variables
 
-- `CHECK_INTERVAL`: The interval in seconds to check for IP changes (default: `300`).
-- `DNS_SERVER`: The address of the DNS server to update.
-- `DNS_ZONE`: The DNS zone to update.
-- `KEY_ALG`: The algorithm for the TSIG key (default: `hmac-sha256`).
-- `KEY_FILE`: The file path to the TSIG key (default: `/run/secrets/rfc2136-secret`).
-- `KEY_NAME`: The name of the TSIG key.
-- `LOOKUP_HOSTNAME`: The hostname to monitor for IP changes.
-- `TTL`: The TTL for DNS records (default: `300`).
+See .env-dist for an example.
 
-### Example Configuration
-
-```sh
-export DNS_SERVER="8.8.8.8"
-export DNS_ZONE="example.com"
-export KEY_NAME="my-key"
-export LOOKUP_HOSTNAME="my-hostname.example.com"
-export KEY_ALG="hmac-sha256"
-export KEY_FILE="/path/to/keyfile"
-export TTL="300"
-export CHECK_INTERVAL="300"
-```
+- `DNS_UPDATE_CHECK_INTERVAL`: The interval in seconds to check for IP changes (default: `300`).
+- `DNS_UPDATE_DNS_SERVER`: The address of the DNS server to update.
+- `DNS_UPDATE_DNS_ZONE`: The DNS zone to update.
+- `DNS_UPDATE_KEY_ALG`: The algorithm for the TSIG key (default: `hmac-sha256`).
+- `DNS_UPDATE_KEY_FILE`: The file path to the TSIG key (default: `/run/secrets/rfc2136-secret`).
+- `DNS_UPDATE_KEY_NAME`: The name of the TSIG key.
+- `DNS_UPDATE_LOOKUP_HOSTNAME`: The hostname to monitor for IP changes.
+- `DNS_UPDATE_TTL`: The TTL for DNS records (default: `300`).
