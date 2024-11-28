@@ -7,6 +7,7 @@ mod config;
 mod dns_client;
 mod dns_monitor;
 mod docker_monitor;
+mod registry;
 mod system_monitor;
 
 use dns_monitor::DnsMonitor;
