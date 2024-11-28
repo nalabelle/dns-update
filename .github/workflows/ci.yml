@@ -25,6 +25,7 @@ jobs:
           override: true
 
       - name: Cache cargo registry
+        id: cache-cargo-registry
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4
         with:
           path: ~/.cargo/registry
@@ -33,6 +34,7 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo index
+        id: cache-cargo-index
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4
         with:
           path: ~/.cargo/git
@@ -41,21 +43,24 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Cache cargo build
+        id: cache-cargo-build
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock, src/**/*') }}
           restore-keys: |
             ${{ runner.os }}-cargo-build-
 
       - name: Build
+        if: ${{ steps.cache-cargo-build.outputs.cache-hit != 'true' }}
         run: cargo build --release
+
+      - name: Run tests
+        if: ${{ steps.cache-cargo-build.outputs.cache-hit != 'true' }}
+        run: cargo test
 
       - name: Upload artifacts
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
         with:
           name: dns-update
           path: target/release/dns-update
-
-      - name: Run tests
-        run: cargo test
