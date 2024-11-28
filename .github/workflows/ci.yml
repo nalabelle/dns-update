@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock, **src/**/*') || github.sha }}
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}-${{ hashfiles('**src/**/*') || github.sha }}
 
       - name: Build
         if: ${{ steps.cache-cargo-build.outputs.cache-hit != 'true' }}
