@@ -48,6 +48,8 @@ jobs:
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock, src/**/*') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock, src/**/*') }}
 
       - name: Build
         if: ${{ steps.cache-cargo-build.outputs.cache-hit != 'true' }}
