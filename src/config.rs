@@ -20,7 +20,8 @@ impl Config {
             dns_zone: env::var("DNS_UPDATE_DNS_ZONE")?,
             key_name: env::var("DNS_UPDATE_KEY_NAME")?,
             key_alg: env::var("DNS_UPDATE_KEY_ALG").unwrap_or_else(|_| "hmac-sha256".to_string()),
-            key_file: env::var("DNS_UPDATE_KEY_FILE")?,
+            key_file: env::var("DNS_UPDATE_KEY_FILE")
+                .unwrap_or_else(|_| "/run/secrets/rfc2136-secret".to_string()),
             ttl: env::var("DNS_UPDATE_TTL")
                 .unwrap_or_else(|_| "300".to_string())
                 .parse()
