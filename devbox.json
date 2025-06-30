@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.4/.schema/devbox.schema.json",
-  "packages": ["rustup@latest", "libiconv@latest", "nodejs@22"],
+  "packages": ["rustup@1.28.2", "libiconv@latest", "nodejs@22.14.0"],
   "env": {
     "DEVBOX_COREPACK_ENABLED": "true"
   },
