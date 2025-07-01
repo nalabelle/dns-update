@@ -32,7 +32,7 @@ repos:
       - id: fmt
         name: cargo fmt
         description: Format Rust code with rustfmt
-        entry: cargo fmt -- --check
+        entry: cargo fmt
         language: system
         pass_filenames: false
         types: [rust]
