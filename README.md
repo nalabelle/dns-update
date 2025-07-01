@@ -1,39 +1,78 @@
-# nextdns_rewrite
+# dns-update
 
-A Python tool to manage DNS rewrites in NextDNS profiles. This tool allows you to update DNS rewrites either from a file or from entries stored in 1Password.
+A Rust-based tool for managing DNS records across multiple providers, with initial support for NextDNS. This provider-agnostic tool allows you to update DNS records from various sources while maintaining a consistent interface.
 
 ## Overview
 
-nextdns_rewrite helps manage DNS rewrites for NextDNS by:
+dns-update provides flexible DNS management through:
 
-- Reading rewrites from a file or 1Password entry
-- Automatically detecting record types (A, AAAA, or CNAME)
-- Efficiently updating NextDNS profiles by only changing what's needed
-- Securely managing credentials through 1Password
+- Provider-agnostic architecture supporting multiple DNS services
+- Strong type safety and async operations
+- Automatic record type detection (A, AAAA, CNAME)
+- Efficient record synchronization with providers
+- Secure credential management through 1Password
+- Thread-safe provider registry for extensibility
 
 ## Requirements
 
-- Python 3
+- Rust toolchain (2024 Edition)
 - 1Password CLI (`op`)
-- NextDNS account
+- NextDNS account (for NextDNS provider)
 - 1Password vault with:
   - NextDNS credentials (under "NextDNS" item)
-  - DNS rewrites (under "DNS Rewrites" item)
+  - DNS records (under "DNS Records" item)
+
+## Installation
+
+```bash
+# Clone and build
+git clone <repository-url>
+cd dns-update
+cargo build --release
+```
 
 ## Basic Usage
 
 ```bash
-# Update using rewrites stored in 1Password
-./rewrite.py
+# Update using records stored in 1Password
+dns-update update
 
-# Update using rewrites from a file
-./rewrite.py path/to/rewrites.txt
+# Update using records from a file
+dns-update update --file path/to/records.txt
+
+# List available providers
+dns-update providers list
 ```
 
-The rewrites file should contain entries in the format:
+The records file supports the following format:
 
 ```
 # IP/hostname followed by the domain
-1.2.3.4 example.com
-2001:db8::1 ipv6.example.com
-target.example.com cname.example.com
+1.2.3.4 example.com          # A record
+2001:db8::1 ipv6.example.com # AAAA record
+target.example.com cname.example.com # CNAME record
+```
+
+## Architecture
+
+The tool uses a provider-agnostic architecture that allows support for multiple DNS services:
+
+- **Core Components**: Provider trait, registry system, and record abstractions
+- **NextDNS Provider**: Complete implementation for NextDNS API
+- **Credential Management**: Secure integration with 1Password
+- **Error Handling**: Comprehensive error types and handling
+
+## Development
+
+```bash
+# Run tests
+cargo test
+
+# Run with logging
+RUST_LOG=debug cargo run -- update
+
+# Format code
+cargo fmt
+
+# Run lints
+cargo clippy

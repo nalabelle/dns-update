@@ -471,7 +471,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dns-rewrite"
+name = "dns-update"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
