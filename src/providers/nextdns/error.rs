@@ -37,3 +37,43 @@ impl From<NextDNSError> for NextDNSProviderError {
         }
     }
 }
+
+use crate::error::Error;
+
+pub fn map_error(e: NextDNSProviderError) -> Error {
+    use NextDNSProviderError::*;
+    match e {
+        Http(err) => Error::ProviderError(err.to_string()),
+        Credential(msg) => Error::CredentialError(msg),
+        NotFound(msg) => Error::NotFound(msg),
+        InvalidInput(msg) => Error::InvalidInput(msg),
+        Provider(msg) => Error::ProviderError(msg),
+        RateLimited => Error::ProviderError("Rate limited".to_string()),
+        Unknown(msg) => Error::Other(msg),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+
+    // --- Error Mapping Tests ---
+    #[test]
+    fn test_map_error_variants() {
+        use NextDNSProviderError::*;
+
+        let err = map_error(Credential("fail".to_string()));
+        assert!(matches!(err, Error::CredentialError(_)));
+        let err = map_error(NotFound("not found".to_string()));
+        assert!(matches!(err, Error::NotFound(_)));
+        let err = map_error(InvalidInput("bad".to_string()));
+        assert!(matches!(err, Error::InvalidInput(_)));
+        let err = map_error(Provider("fail".to_string()));
+        assert!(matches!(err, Error::ProviderError(_)));
+        let err = map_error(RateLimited);
+        assert!(matches!(err, Error::ProviderError(_)));
+        let err = map_error(Unknown("fail".to_string()));
+        assert!(matches!(err, Error::Other(_)));
+    }
+}

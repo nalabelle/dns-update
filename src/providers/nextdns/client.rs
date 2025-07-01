@@ -1,165 +1,15 @@
-use std::sync::Arc;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::auth::credentials::CredentialManager;
-    use httpmock::prelude::*;
-    use mockall::predicate::*;
-    use std::sync::Arc;
-
-    struct FakeCredentialManager {
-        creds: std::collections::HashMap<String, String>,
-        fail: bool,
-    }
-
-    use crate::error::Error;
-    impl CredentialManager for FakeCredentialManager {
-        fn get(&self, key: &str) -> Result<String, Error> {
-            if self.fail {
-                Err(Error::CredentialError("invalid credentials".into()))
-            } else {
-                self.creds
-                    .get(key)
-                    .cloned()
-                    .ok_or(Error::CredentialError("missing".into()))
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_full_workflow_success() {
-        let server = MockServer::start_async().await;
-        let profile_id = "profileid";
-        let api_url = server.url("");
-        // Mock login endpoint
-        let login_mock = server
-            .mock_async(|when, then| {
-                when.method(POST).path("/auth/login");
-                then.status(200)
-                    .json_body_obj(&serde_json::json!({ "success": true }));
-            })
-            .await;
-        // Mock list rewrites endpoint
-        let list_mock = server
-            .mock_async(|when, then| {
-                when.method(GET)
-                    .path(format!("/profiles/{profile_id}/dns/rewrites"));
-                then.status(200)
-                    .json_body_obj::<Vec<serde_json::Value>>(&vec![]);
-            })
-            .await;
-
-        let creds = FakeCredentialManager {
-            creds: [
-                ("nextdns_email".into(), "user@example.com".into()),
-                ("nextdns_password".into(), "secret".into()),
-            ]
-            .iter()
-            .cloned()
-            .collect(),
-            fail: false,
-        };
-
-        let config = NextDNSConfig {
-            profile_id: profile_id.into(),
-            api_url: api_url.clone(),
-        };
-        let provider = NextDNSProvider::new(config, Arc::new(creds)).await;
-        assert!(provider.is_ok());
-        // Actually call list_rewrites to trigger both mocks
-        let provider = provider.unwrap();
-        let _ = provider.list_rewrites().await;
-        login_mock.assert_async().await;
-        list_mock.assert_async().await;
-    }
-
-    #[tokio::test]
-    async fn test_workflow_with_invalid_credentials() {
-        let server = MockServer::start_async().await;
-        let profile_id = "profileid";
-        let api_url = server.url("");
-        // Mock login endpoint to fail
-        let login_mock = server
-            .mock_async(|when, then| {
-                when.method(POST).path("/auth/login");
-                then.status(401)
-                    .json_body_obj(&serde_json::json!({ "error": "unauthorized" }));
-            })
-            .await;
-
-        let creds = FakeCredentialManager {
-            creds: [
-                ("nextdns_email".into(), "baduser".into()),
-                ("nextdns_password".into(), "badpass".into()),
-            ]
-            .iter()
-            .cloned()
-            .collect(),
-            fail: false,
-        };
-
-        let config = NextDNSConfig {
-            profile_id: profile_id.into(),
-            api_url: api_url.clone(),
-        };
-        let provider = NextDNSProvider::new(config, Arc::new(creds)).await;
-        assert!(provider.is_err());
-        login_mock.assert_async().await;
-    }
-
-    #[tokio::test]
-    async fn test_workflow_with_api_failure() {
-        let server = MockServer::start_async().await;
-        let profile_id = "profileid";
-        let api_url = server.url("");
-        // Mock login endpoint
-        let login_mock = server
-            .mock_async(|when, then| {
-                when.method(POST).path("/auth/login");
-                then.status(200)
-                    .json_body_obj(&serde_json::json!({ "success": true }));
-            })
-            .await;
-        // Mock list rewrites endpoint to fail
-        let list_mock = server
-            .mock_async(|when, then| {
-                when.method(GET)
-                    .path(format!("/profiles/{profile_id}/dns/rewrites"));
-                then.status(500)
-                    .json_body_obj(&serde_json::json!({ "error": "server error" }));
-            })
-            .await;
-
-        let creds = FakeCredentialManager {
-            creds: [
-                ("nextdns_email".into(), "user@example.com".into()),
-                ("nextdns_password".into(), "secret".into()),
-            ]
-            .iter()
-            .cloned()
-            .collect(),
-            fail: false,
-        };
-
-        let config = NextDNSConfig {
-            profile_id: profile_id.into(),
-            api_url: api_url.clone(),
-        };
-        let provider = NextDNSProvider::new(config, Arc::new(creds)).await.unwrap();
-        let result = provider.list_rewrites().await;
-        assert!(result.is_err());
-        login_mock.assert_async().await;
-        list_mock.assert_async().await;
-    }
-}
 use reqwest::{Client, StatusCode};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use crate::auth::credentials::CredentialManager;
-use crate::providers::nextdns::error::NextDNSProviderError;
+use crate::core::provider::DNSProvider;
+use crate::core::record::DNSRecord;
+use crate::error::Error;
+use crate::providers::nextdns::error::{NextDNSProviderError, map_error};
 use crate::providers::nextdns::types::*;
+use async_trait::async_trait;
 
 pub struct NextDNSConfig {
     pub profile_id: String,
@@ -330,4 +180,211 @@ impl NextDNSProvider {
             }
         }
     }
+}
+
+#[async_trait]
+impl DNSProvider for NextDNSProvider {
+    fn name(&self) -> &str {
+        "nextdns"
+    }
+
+    async fn list_records(&self) -> Result<Vec<DNSRecord>, Error> {
+        self.list_rewrites()
+            .await
+            .map(|v| v.into_iter().map(|r| to_dns_record(&r)).collect())
+            .map_err(map_error)
+    }
+
+    async fn add_record(&self, record: DNSRecord) -> Result<(), Error> {
+        let req = to_nextdns_record(&record);
+        self.create_rewrite(&req)
+            .await
+            .map(|_| ())
+            .map_err(map_error)
+    }
+
+    async fn update_record(&self, record: DNSRecord) -> Result<(), Error> {
+        // NextDNS needs record id, so we must fetch all and match
+        let records = self.list_rewrites().await.map_err(map_error)?;
+        if let Some(existing) = records
+            .iter()
+            .find(|r| r.domain == record.name && r.value == record.value)
+        {
+            let req = to_nextdns_record(&record);
+            self.update_rewrite(&existing.id, &req)
+                .await
+                .map(|_| ())
+                .map_err(map_error)
+        } else {
+            Err(Error::NotFound("Record not found".to_string()))
+        }
+    }
+
+    async fn delete_record(&self, record: DNSRecord) -> Result<(), Error> {
+        let records = self.list_rewrites().await.map_err(map_error)?;
+        if let Some(existing) = records
+            .iter()
+            .find(|r| r.domain == record.name && r.value == record.value)
+        {
+            self.delete_rewrite(&existing.id).await.map_err(map_error)
+        } else {
+            Err(Error::NotFound("Record not found".to_string()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::credentials::CredentialManager;
+    use httpmock::prelude::*;
+    use mockall::predicate::*;
+    use std::sync::Arc;
+
+    struct FakeCredentialManager {
+        creds: std::collections::HashMap<String, String>,
+        fail: bool,
+    }
+
+    use crate::error::Error;
+    impl CredentialManager for FakeCredentialManager {
+        fn get(&self, key: &str) -> Result<String, Error> {
+            if self.fail {
+                Err(Error::CredentialError("invalid credentials".into()))
+            } else {
+                self.creds
+                    .get(key)
+                    .cloned()
+                    .ok_or(Error::CredentialError("missing".into()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_full_workflow_success() {
+        let server = MockServer::start_async().await;
+        let profile_id = "profileid";
+        let api_url = server.url("");
+        // Mock login endpoint
+        let login_mock = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/auth/login");
+                then.status(200)
+                    .json_body_obj(&serde_json::json!({ "success": true }));
+            })
+            .await;
+        // Mock list rewrites endpoint
+        let list_mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(format!("/profiles/{profile_id}/dns/rewrites"));
+                then.status(200)
+                    .json_body_obj::<Vec<serde_json::Value>>(&vec![]);
+            })
+            .await;
+
+        let creds = FakeCredentialManager {
+            creds: [
+                ("nextdns_email".into(), "user@example.com".into()),
+                ("nextdns_password".into(), "secret".into()),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+            fail: false,
+        };
+
+        let config = NextDNSConfig {
+            profile_id: profile_id.into(),
+            api_url: api_url.clone(),
+        };
+        let provider = NextDNSProvider::new(config, Arc::new(creds)).await;
+        assert!(provider.is_ok());
+        // Actually call list_rewrites to trigger both mocks
+        let provider = provider.unwrap();
+        let _ = provider.list_rewrites().await;
+        login_mock.assert_async().await;
+        list_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_workflow_with_invalid_credentials() {
+        let server = MockServer::start_async().await;
+        let profile_id = "profileid";
+        let api_url = server.url("");
+        // Mock login endpoint to fail
+        let login_mock = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/auth/login");
+                then.status(401)
+                    .json_body_obj(&serde_json::json!({ "error": "unauthorized" }));
+            })
+            .await;
+
+        let creds = FakeCredentialManager {
+            creds: [
+                ("nextdns_email".into(), "baduser".into()),
+                ("nextdns_password".into(), "badpass".into()),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+            fail: false,
+        };
+
+        let config = NextDNSConfig {
+            profile_id: profile_id.into(),
+            api_url: api_url.clone(),
+        };
+        let provider = NextDNSProvider::new(config, Arc::new(creds)).await;
+        assert!(provider.is_err());
+        login_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_workflow_with_api_failure() {
+        let server = MockServer::start_async().await;
+        let profile_id = "profileid";
+        let api_url = server.url("");
+        // Mock login endpoint
+        let login_mock = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/auth/login");
+                then.status(200)
+                    .json_body_obj(&serde_json::json!({ "success": true }));
+            })
+            .await;
+        // Mock list rewrites endpoint to fail
+        let list_mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(format!("/profiles/{profile_id}/dns/rewrites"));
+                then.status(500)
+                    .json_body_obj(&serde_json::json!({ "error": "server error" }));
+            })
+            .await;
+
+        let creds = FakeCredentialManager {
+            creds: [
+                ("nextdns_email".into(), "user@example.com".into()),
+                ("nextdns_password".into(), "secret".into()),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+            fail: false,
+        };
+
+        let config = NextDNSConfig {
+            profile_id: profile_id.into(),
+            api_url: api_url.clone(),
+        };
+        let provider = NextDNSProvider::new(config, Arc::new(creds)).await.unwrap();
+        let result = provider.list_rewrites().await;
+        assert!(result.is_err());
+        login_mock.assert_async().await;
+        list_mock.assert_async().await;
+    }
+
+    // Additional integration tests can be added here with HTTP mocking as needed.
 }
