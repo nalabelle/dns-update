@@ -3,7 +3,7 @@
   "packages": [
     "shellcheck@0.10.0",
     "pre-commit@4.2.0",
-    "rustup@latest",
+    "rustup@1.28.2",
     "libiconv@latest"
   ]
 }

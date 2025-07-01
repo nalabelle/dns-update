@@ -38,6 +38,14 @@
             }
           ],
           "store_path": "/nix/store/kjw10j3vv528lmps6l66kc97fxhg5hfy-libiconv-109"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "path": "/tmp/containerbase/cache/nix/store/279bpqancvb18sbv0klbda9pvp6yz8l0-glibc-iconv-2.40",
+              "default": true
+            }
+          ]
         }
       }
     },
@@ -105,7 +113,7 @@
         }
       }
     },
-    "rustup@latest": {
+    "rustup@1.28.2": {
       "last_modified": "2025-06-20T02:24:11Z",
       "plugin_version": "0.0.1",
       "resolved": "github:NixOS/nixpkgs/076e8c6678d8c54204abcb4b1b14c366835a58bb#rustup",
